@@ -1,0 +1,13 @@
+{
+  "name": "CrisisConnect",
+  "description": "Cloud‑based emergency response platform for hospitality venues, featuring guest SOS alerts, real-time staff coordination, and AI-powered translations.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "real-time notifications",
+    "emergency alerts",
+    "AI translation",
+    "crisis management"
+  ]
+}
