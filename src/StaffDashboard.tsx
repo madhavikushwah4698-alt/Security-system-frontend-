@@ -5,6 +5,7 @@ import {
   Database,
   History,
   Languages,
+  LogOut,
   MapPin,
   Send,
   ShieldCheck,
@@ -14,11 +15,11 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AuditLog, EmergencyAlert, User } from './types';
-import { translateToEnglish } from './services/geminiService';
 import { API_BASE_URL, getErrorMessage, requestJson } from './api';
 
 interface StaffDashboardProps {
   user: User;
+  onLogout: () => void;
 }
 
 type DashboardTab = 'ALERTS' | 'GUESTS' | 'USERS' | 'AUDIT';
@@ -41,6 +42,12 @@ type PersonnelCreateResponse = User & {
   tempPassword?: string;
 };
 
+type AuditLogTone = {
+  badge: string;
+  card: string;
+  accent: string;
+};
+
 function normalizeAlert(alert: EmergencyAlert): EmergencyAlert {
   return {
     ...alert,
@@ -58,6 +65,13 @@ function mergeAlertList(current: EmergencyAlert[], nextAlert: EmergencyAlert) {
   return exists
     ? current.map((alert) => (alert.id === normalized.id ? normalized : alert))
     : [normalized, ...current];
+}
+
+function upsertUser(current: User[], nextUser: User) {
+  const exists = current.some((user) => user.id === nextUser.id);
+  return exists
+    ? current.map((user) => (user.id === nextUser.id ? { ...user, ...nextUser } : user))
+    : [nextUser, ...current];
 }
 
 function alertProtocol(type: EmergencyAlert['type']) {
@@ -82,7 +96,106 @@ function alertProtocol(type: EmergencyAlert['type']) {
   return protocolMap[type] || [];
 }
 
-export default function StaffDashboard({ user }: StaffDashboardProps) {
+function getAuditLogTone(log: AuditLog): AuditLogTone {
+  const action = log.action.toUpperCase();
+  const details = log.details.toUpperCase();
+
+  if (action.startsWith('SOS_')) {
+    if (action.includes('FIRE')) {
+      return {
+        badge: 'border-red-500/30 bg-red-500/15 text-red-300',
+        card: 'border-red-500/15 bg-red-500/8',
+        accent: 'bg-red-500/40',
+      };
+    }
+
+    if (action.includes('MEDICAL')) {
+      return {
+        badge: 'border-cyan-500/30 bg-cyan-500/15 text-cyan-300',
+        card: 'border-cyan-500/15 bg-cyan-500/8',
+        accent: 'bg-cyan-500/40',
+      };
+    }
+
+    return {
+      badge: 'border-amber-500/30 bg-amber-500/15 text-amber-200',
+      card: 'border-amber-500/15 bg-amber-500/8',
+      accent: 'bg-amber-500/40',
+    };
+  }
+
+  if (action === 'ALERT_STATUS_UPDATED') {
+    if (details.includes('RESOLVED')) {
+      return {
+        badge: 'border-green-500/30 bg-green-500/15 text-green-300',
+        card: 'border-green-500/15 bg-green-500/8',
+        accent: 'bg-green-500/40',
+      };
+    }
+
+    if (details.includes('RESOLVING')) {
+      return {
+        badge: 'border-orange-500/30 bg-orange-500/15 text-orange-300',
+        card: 'border-orange-500/15 bg-orange-500/8',
+        accent: 'bg-orange-500/40',
+      };
+    }
+
+    if (details.includes('ACKNOWLEDGED')) {
+      return {
+        badge: 'border-blue-500/30 bg-blue-500/15 text-blue-300',
+        card: 'border-blue-500/15 bg-blue-500/8',
+        accent: 'bg-blue-500/40',
+      };
+    }
+
+    return {
+      badge: 'border-yellow-500/30 bg-yellow-500/15 text-yellow-300',
+      card: 'border-yellow-500/15 bg-yellow-500/8',
+      accent: 'bg-yellow-500/40',
+    };
+  }
+
+  if (action === 'GUEST_ROOM_UPDATED') {
+    return {
+      badge: 'border-indigo-500/30 bg-indigo-500/15 text-indigo-300',
+      card: 'border-indigo-500/15 bg-indigo-500/8',
+      accent: 'bg-indigo-500/40',
+    };
+  }
+
+  if (action === 'USER_CREATED') {
+    return {
+      badge: 'border-violet-500/30 bg-violet-500/15 text-violet-300',
+      card: 'border-violet-500/15 bg-violet-500/8',
+      accent: 'bg-violet-500/40',
+    };
+  }
+
+  if (action === 'REGISTER') {
+    return {
+      badge: 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300',
+      card: 'border-emerald-500/15 bg-emerald-500/8',
+      accent: 'bg-emerald-500/40',
+    };
+  }
+
+  if (action === 'LOGIN') {
+    return {
+      badge: 'border-white/10 bg-white/5 text-slate-300',
+      card: 'border-white/5 bg-black/30',
+      accent: 'bg-white/20',
+    };
+  }
+
+  return {
+    badge: 'border-white/10 bg-white/5 text-slate-300',
+    card: 'border-white/5 bg-black/30',
+    accent: 'bg-white/20',
+  };
+}
+
+export default function StaffDashboard({ user, onLogout }: StaffDashboardProps) {
   const [activeTab, setActiveTab] = useState<DashboardTab>('ALERTS');
   const [alerts, setAlerts] = useState<EmergencyAlert[]>([]);
   const [selectedAlert, setSelectedAlert] = useState<EmergencyAlert | null>(null);
@@ -140,13 +253,6 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
 
     const handleNewAlert = async (incoming: EmergencyAlert) => {
       const translatedAlert = normalizeAlert(incoming);
-      if (translatedAlert.guestInfo?.originalMessage) {
-        translatedAlert.guestInfo.translatedMessage = await translateToEnglish(
-          translatedAlert.guestInfo.originalMessage,
-          translatedAlert.guestInfo.language
-        );
-      }
-
       setAlerts((prev) => mergeAlertList(prev, translatedAlert));
       setSelectedAlert((current) => current || translatedAlert);
       setStaffLog((prev) => [
@@ -179,11 +285,28 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
     socket.on('alert_updated', handleUpdatedAlert);
     socket.on('guest_logged_in', (guest: GuestLoginEntry) => {
       setGuestLogins((prev) => [guest, ...prev.filter((entry) => entry.id !== guest.id)].slice(0, 20));
+      if (user.role === 'ADMIN') {
+        setGuests((prev) =>
+          upsertUser(prev, {
+            id: guest.id,
+            username: guest.username,
+            email: guest.email,
+            role: 'USER',
+            room: guest.room,
+          })
+        );
+      }
     });
 
     if (user.role === 'ADMIN') {
       socket.on('new_audit_log', (log: AuditLog) => {
         setAuditLogs((prev) => [log, ...prev.filter((entry) => entry.id !== log.id)]);
+      });
+      socket.on('guest_room_updated', (guest: User) => {
+        setGuests((prev) => upsertUser(prev, { ...guest, role: 'USER' }));
+      });
+      socket.on('personnel_created', (member: User) => {
+        setSystemUsers((prev) => upsertUser(prev, member));
       });
     }
 
@@ -302,26 +425,26 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
   const protocolSteps = selectedAlert ? alertProtocol(selectedAlert.type) : [];
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-[#0A0A0B] text-slate-200">
-      <nav className="z-40 flex h-16 shrink-0 items-center justify-between border-b border-white/10 bg-[#0F0F12] px-6 shadow-2xl">
-        <div className="flex items-center gap-8">
+    <div className="flex min-h-screen flex-col bg-[#0A0A0B] text-slate-200">
+      <nav className="z-40 flex shrink-0 flex-col gap-4 border-b border-white/10 bg-[#0F0F12] px-4 py-4 shadow-2xl sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-center lg:gap-8">
           <div className="flex items-center gap-3">
             <div className="rounded bg-red-600 p-2 text-white shadow-lg shadow-red-600/20">
               <Siren size={20} />
             </div>
-            <span className="text-xl font-black uppercase italic tracking-tight text-white">
+            <span className="text-lg font-black uppercase italic tracking-tight text-white sm:text-xl">
               Crisis<span className="text-red-500">Connect</span>
             </span>
           </div>
 
-          <div className="flex gap-1 border-l border-white/10 pl-8">
+          <div className="-mx-1 flex overflow-x-auto border-white/10 pb-1 lg:mx-0 lg:border-l lg:pl-8 lg:pb-0">
             {(['ALERTS', 'GUESTS', 'USERS', 'AUDIT'] as DashboardTab[])
               .filter((tab) => user.role === 'ADMIN' || tab === 'ALERTS')
               .map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`rounded-lg px-4 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all ${
+                  className={`shrink-0 rounded-lg px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all sm:px-4 ${
                     activeTab === tab
                       ? 'border border-white/10 bg-white/10 text-white'
                       : 'text-slate-500 hover:text-slate-300'
@@ -333,21 +456,30 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 rounded-full border border-green-500/20 bg-green-500/10 px-3 py-1">
-          <div className="h-2 w-2 rounded-full bg-green-500" />
-          <span className="text-[10px] font-bold uppercase tracking-widest text-green-500">
-            Node Active: {user.username}
-          </span>
+        <div className="flex items-center justify-between gap-2 sm:justify-end">
+          <div className="flex max-w-[min(15rem,70vw)] items-center gap-2 rounded-full border border-green-500/20 bg-green-500/10 px-3 py-1 sm:max-w-[min(16rem,42vw)]">
+            <div className="h-2 w-2 shrink-0 rounded-full bg-green-500" />
+            <span className="truncate text-[10px] font-bold uppercase tracking-widest text-green-500">
+              Node Active: {user.username}
+            </span>
+          </div>
+          <button
+            onClick={onLogout}
+            className="shrink-0 rounded-full border border-white/10 bg-[#141417] p-2 text-slate-500 shadow-xl transition-all hover:border-red-600/50 hover:text-red-500"
+            title="Logout"
+          >
+            <LogOut size={16} />
+          </button>
         </div>
       </nav>
 
       {dashboardError ? (
-        <div className="border-b border-red-600/20 bg-red-600/10 px-6 py-3 text-[10px] font-black uppercase tracking-[0.25em] text-red-200">
+        <div className="border-b border-red-600/20 bg-red-600/10 px-4 py-3 text-[10px] font-black uppercase tracking-[0.25em] text-red-200 sm:px-6">
           {dashboardError}
         </div>
       ) : null}
 
-      <main className="relative flex flex-1 overflow-hidden">
+      <main className="relative flex flex-1 flex-col overflow-hidden xl:flex-row">
         <AnimatePresence mode="wait">
           {activeTab === 'ALERTS' ? (
             <motion.div
@@ -355,9 +487,9 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="flex w-full flex-1 overflow-hidden"
+              className="flex w-full flex-1 flex-col overflow-hidden xl:flex-row"
             >
-              <aside className="flex w-80 shrink-0 flex-col border-r border-white/10 bg-[#0F0F12]">
+              <aside className="flex max-h-[16rem] w-full shrink-0 flex-col border-b border-white/10 bg-[#0F0F12] xl:max-h-none xl:w-80 xl:border-b-0 xl:border-r">
                 <div className="border-b border-white/5 bg-black/20 p-4">
                   <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-500">
                     Active Emergency Stream ({alerts.filter((alert) => alert.status !== 'RESOLVED').length})
@@ -407,7 +539,7 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
                 </div>
               </aside>
 
-              <div className="flex flex-1 flex-col gap-6 overflow-y-auto overflow-x-hidden bg-[#0A0A0B] p-6">
+              <div className="flex flex-1 flex-col gap-4 overflow-y-auto overflow-x-hidden bg-[#0A0A0B] p-4 sm:gap-6 sm:p-6">
                 {selectedAlert ? (
                   <motion.div
                     key={selectedAlert.id}
@@ -415,21 +547,21 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
                     animate={{ opacity: 1, x: 0 }}
                     className="flex flex-col gap-6"
                   >
-                    <header className="flex items-end justify-between rounded-2xl border border-white/10 bg-[#141417] p-6">
-                      <div>
-                        <div className="mb-2 flex items-center gap-3">
+                    <header className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-[#141417] p-4 sm:p-6 lg:flex-row lg:items-end lg:justify-between">
+                      <div className="min-w-0">
+                        <div className="mb-2 flex flex-wrap items-center gap-3">
                           <span className="rounded bg-red-600 px-2 py-0.5 text-[10px] font-black uppercase text-white">
                             Critical
                           </span>
-                          <h1 className="text-3xl font-light uppercase italic tracking-tight text-white">
+                          <h1 className="text-2xl font-light uppercase italic tracking-tight text-white sm:text-3xl">
                             {selectedAlert.type}: <span className="font-bold">Room {selectedAlert.room}</span>
                           </h1>
                         </div>
-                        <p className="ml-1 text-xs font-bold uppercase tracking-widest text-slate-500">
+                        <p className="ml-1 text-[10px] font-bold uppercase tracking-widest text-slate-500 sm:text-xs">
                           Dispatch Origin: ID-{selectedAlert.id.substring(0, 8)}
                         </p>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex flex-col gap-2 sm:flex-row">
                         {selectedAlert.status !== 'ACKNOWLEDGED' ? (
                           <button
                             onClick={() => updateAlertStatus(selectedAlert.id, 'ACKNOWLEDGED')}
@@ -447,7 +579,7 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
                       </div>
                     </header>
 
-                    <div className="grid grid-cols-5 gap-4">
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 sm:gap-4">
                       {[
                         { label: 'Latency', value: '00:04', icon: Clock },
                         { label: 'Response', value: selectedAlert.status, icon: Siren },
@@ -463,8 +595,8 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
                       ))}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-6">
-                      <section className="rounded-2xl border border-white/10 bg-[#141417] p-6 shadow-2xl">
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-6">
+                      <section className="rounded-2xl border border-white/10 bg-[#141417] p-4 shadow-2xl sm:p-6">
                         <h3 className="mb-6 border-b border-white/5 pb-2 text-[10px] font-black uppercase tracking-widest text-slate-500">
                           Intelligence Intercept
                         </h3>
@@ -474,12 +606,27 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
                         {selectedAlert.guestInfo?.translatedMessage ? (
                           <div className="flex items-start gap-3 rounded-xl border border-blue-500/20 bg-blue-500/5 p-4 text-sm font-bold text-blue-100">
                             <Languages size={14} className="mt-1 shrink-0 text-blue-500" />
-                            <span>"{selectedAlert.guestInfo.translatedMessage}"</span>
+                            <div className="space-y-2">
+                              <span className="block">"{selectedAlert.guestInfo.translatedMessage}"</span>
+                              {selectedAlert.guestInfo.detectedLanguage ? (
+                                <div className="text-[10px] uppercase tracking-[0.25em] text-blue-300/80">
+                                  Detected: {selectedAlert.guestInfo.detectedLanguage}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : null}
+                        {selectedAlert.guestInfo?.aiSummary ? (
+                          <div className="mt-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+                            <div className="mb-2 text-[10px] font-black uppercase tracking-[0.3em] text-emerald-300">
+                              AI Summary
+                            </div>
+                            <p className="text-sm font-bold text-emerald-100">{selectedAlert.guestInfo.aiSummary}</p>
                           </div>
                         ) : null}
                       </section>
 
-                      <section className="rounded-2xl border border-white/10 bg-[#141417] p-6 shadow-2xl">
+                      <section className="rounded-2xl border border-white/10 bg-[#141417] p-4 shadow-2xl sm:p-6">
                         <h3 className="mb-6 border-b border-white/5 pb-2 text-[10px] font-black uppercase tracking-widest text-slate-500">
                           Action Protocol
                         </h3>
@@ -499,7 +646,7 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
                     </div>
 
                     <div className="flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#141417] shadow-2xl">
-                      <div className="flex items-center gap-4 border-b border-white/5 p-6">
+                      <div className="flex flex-col gap-3 border-b border-white/5 p-4 sm:flex-row sm:items-center sm:gap-4 sm:p-6">
                         <div className="relative flex-1">
                           <input
                             type="text"
@@ -513,7 +660,7 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
                         <button
                           onClick={() => void addUpdate()}
                           disabled={isSubmittingUpdate || !newUpdate.trim()}
-                          className="flex items-center gap-3 rounded-xl bg-red-600 px-8 py-4 text-white shadow-lg shadow-red-600/20 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                          className="flex w-full items-center justify-center gap-3 rounded-xl bg-red-600 px-6 py-4 text-white shadow-lg shadow-red-600/20 transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:px-8"
                         >
                           <span className="text-[10px] font-black uppercase tracking-widest">
                             {isSubmittingUpdate ? 'Posting' : 'Post'}
@@ -521,14 +668,14 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
                           <Send size={14} />
                         </button>
                       </div>
-                      <div className="max-h-48 space-y-4 overflow-y-auto bg-black/20 p-6">
+                      <div className="max-h-48 space-y-4 overflow-y-auto bg-black/20 p-4 sm:p-6">
                         {selectedAlert.updates.length === 0 ? (
                           <div className="rounded-xl border border-white/5 bg-black/20 p-4 text-xs uppercase tracking-widest text-slate-500">
                             No updates posted yet.
                           </div>
                         ) : (
                           selectedAlert.updates.map((upd, idx) => (
-                            <div key={`${selectedAlert.id}-${idx}`} className="flex items-start gap-6">
+                            <div key={`${selectedAlert.id}-${idx}`} className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-6">
                               <span className="pt-1 font-mono text-[9px] uppercase text-slate-700">{upd.time}</span>
                               <div className="flex-1 rounded-xl border border-white/5 bg-white/5 p-4">
                                 <span className="mb-1 block text-[9px] font-black uppercase tracking-widest text-slate-500">
@@ -557,10 +704,10 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
-              className="flex-1 overflow-y-auto p-8"
+              className="flex-1 overflow-y-auto p-4 sm:p-8"
             >
-              <div className="mx-auto grid max-w-5xl grid-cols-3 gap-10">
-                <div className="col-span-2">
+              <div className="mx-auto grid max-w-5xl grid-cols-1 gap-8 lg:grid-cols-3 lg:gap-10">
+                <div className="lg:col-span-2">
                   <h2 className="mb-8 flex items-center gap-3 text-2xl font-black uppercase italic tracking-tighter text-white">
                     <Users className="text-red-500" />
                     Authorized Personnel
@@ -569,7 +716,7 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
                     {systemUsers.map((member) => (
                       <div
                         key={member.id}
-                        className="flex items-center justify-between rounded-2xl border border-white/10 bg-[#141417] p-6"
+                        className="flex flex-col items-start justify-between gap-4 rounded-2xl border border-white/10 bg-[#141417] p-4 sm:flex-row sm:items-center sm:p-6"
                       >
                         <div className="flex items-center gap-4">
                           <div
@@ -598,7 +745,7 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
                 </div>
 
                 <div>
-                  <div className="sticky top-0 rounded-3xl border border-red-600/20 bg-[#141417] p-8 shadow-2xl">
+                  <div className="rounded-3xl border border-red-600/20 bg-[#141417] p-6 shadow-2xl sm:p-8 lg:sticky lg:top-0">
                     <h3 className="mb-6 flex items-center gap-3 text-sm font-black uppercase italic tracking-widest text-white">
                       <UserPlus className="text-red-500" size={18} />
                       Provision New Personnel
@@ -653,15 +800,15 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
-              className="flex-1 overflow-y-auto p-8"
+              className="flex-1 overflow-y-auto p-4 sm:p-8"
             >
               <div className="mx-auto max-w-5xl">
-                <div className="mb-8 flex items-center justify-between">
-                  <h2 className="flex items-center gap-3 text-2xl font-black uppercase italic tracking-tighter text-white">
+                <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <h2 className="flex items-center gap-3 text-xl font-black uppercase italic tracking-tighter text-white sm:text-2xl">
                     <Users className="text-red-500" />
                     Manage Guests
                   </h2>
-                  <div className="flex gap-4 rounded-xl border border-white/5 bg-[#141417] px-4 py-2 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                  <div className="flex w-full justify-between gap-4 rounded-xl border border-white/5 bg-[#141417] px-4 py-2 text-[10px] font-black uppercase tracking-widest text-slate-500 sm:w-auto sm:justify-start">
                     <span>Live guest activity</span>
                     <span className="text-green-500">Online</span>
                   </div>
@@ -754,7 +901,7 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
-              className="flex-1 overflow-y-auto p-8"
+              className="flex-1 overflow-y-auto p-4 sm:p-8"
             >
               <div className="mx-auto max-w-4xl">
                 <div className="mb-8 flex items-center justify-between">
@@ -769,7 +916,35 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
                 </div>
 
                 <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#141417] shadow-2xl">
-                  <table className="w-full text-left">
+                  <div className="divide-y divide-white/5 md:hidden">
+                    {auditLogs.map((log) => {
+                      const tone = getAuditLogTone(log);
+                      return (
+                        <div key={log.id} className="space-y-3 p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-500">Timestamp</div>
+                              <div className="mt-1 font-mono text-[11px] text-slate-400">{new Date(log.timestamp).toLocaleString()}</div>
+                            </div>
+                            <span className={`shrink-0 rounded border px-2 py-1 text-[9px] font-black uppercase tracking-tighter ${tone.badge}`}>
+                              {log.action}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-1 gap-3">
+                            <div>
+                              <div className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-500">Operator</div>
+                              <div className="mt-1 text-sm font-bold uppercase tracking-tight text-white">{log.username}</div>
+                            </div>
+                            <div>
+                              <div className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-500">Details</div>
+                              <div className="mt-1 text-xs uppercase tracking-tight text-slate-300">{log.details}</div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <table className="hidden w-full text-left md:table">
                     <thead className="border-b border-white/5 bg-black/40">
                       <tr>
                         <th className="px-6 py-4 text-[9px] font-black uppercase tracking-widest text-slate-500">Timestamp</th>
@@ -781,14 +956,21 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
                     <tbody className="divide-y divide-white/5 italic">
                       {auditLogs.map((log) => (
                         <tr key={log.id} className="transition-colors hover:bg-white/5">
-                          <td className="px-6 py-4 font-mono text-[10px] text-slate-600">{new Date(log.timestamp).toLocaleString()}</td>
-                          <td className="px-6 py-4 text-xs font-bold uppercase tracking-tight text-white">{log.username}</td>
-                          <td className="px-6 py-4">
-                            <span className="rounded bg-white/5 px-2 py-0.5 text-[9px] font-black uppercase tracking-tighter text-slate-300">
-                              {log.action}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-xs uppercase tracking-tighter text-slate-500">{log.details}</td>
+                          {(() => {
+                            const tone = getAuditLogTone(log);
+                            return (
+                              <>
+                                <td className="px-6 py-4 font-mono text-[10px] text-slate-600">{new Date(log.timestamp).toLocaleString()}</td>
+                                <td className="px-6 py-4 text-xs font-bold uppercase tracking-tight text-white">{log.username}</td>
+                                <td className="px-6 py-4">
+                                  <span className={`rounded border px-2 py-0.5 text-[9px] font-black uppercase tracking-tighter ${tone.badge}`}>
+                                    {log.action}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 text-xs uppercase tracking-tighter text-slate-300">{log.details}</td>
+                              </>
+                            );
+                          })()}
                         </tr>
                       ))}
                     </tbody>
@@ -802,7 +984,7 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
           )}
         </AnimatePresence>
 
-        <aside className="relative z-10 flex w-80 shrink-0 flex-col border-l border-white/10 bg-[#0F0F12] p-6">
+        <aside className="relative z-10 flex w-full shrink-0 flex-col border-t border-white/10 bg-[#0F0F12] p-4 sm:p-6 xl:w-80 xl:border-l xl:border-t-0">
           <div className="flex-1 overflow-hidden">
             <div className="flex h-full flex-col overflow-hidden">
               <h3 className="mb-6 flex items-center gap-2 border-b border-white/5 pb-2 text-[10px] font-black uppercase tracking-widest text-slate-500">
@@ -834,13 +1016,24 @@ export default function StaffDashboard({ user }: StaffDashboardProps) {
                     </div>
                     <div className="max-h-52 space-y-3 overflow-y-auto pr-1">
                       {auditLogs.slice(0, 5).map((log) => (
-                        <div key={log.id} className="rounded-2xl border border-white/5 bg-black/30 p-3 text-[10px] text-slate-300">
-                          <div className="mb-1 font-black uppercase tracking-[0.25em] text-slate-500">{log.username}</div>
-                          <p className="text-xs leading-snug text-slate-200">{log.details}</p>
-                          <div className="mt-2 text-[8px] uppercase tracking-[0.35em] text-slate-600">
-                            {new Date(log.timestamp).toLocaleTimeString()}
-                          </div>
-                        </div>
+                        (() => {
+                          const tone = getAuditLogTone(log);
+                          return (
+                            <div key={log.id} className={`relative overflow-hidden rounded-2xl border p-3 text-[10px] ${tone.card}`}>
+                              <div className={`absolute left-0 top-0 h-full w-1 ${tone.accent}`} />
+                              <div className="mb-1 pl-2 font-black uppercase tracking-[0.25em] text-slate-400">{log.username}</div>
+                              <div className="mb-2 pl-2">
+                                <span className={`rounded border px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.25em] ${tone.badge}`}>
+                                  {log.action}
+                                </span>
+                              </div>
+                              <p className="pl-2 text-xs leading-snug text-slate-200">{log.details}</p>
+                              <div className="mt-2 pl-2 text-[8px] uppercase tracking-[0.35em] text-slate-600">
+                                {new Date(log.timestamp).toLocaleTimeString()}
+                              </div>
+                            </div>
+                          );
+                        })()
                       ))}
                     </div>
                   </div>

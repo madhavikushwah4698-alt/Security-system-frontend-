@@ -15,7 +15,6 @@ export default function Login({ onLogin, notice, onNoticeClear }: LoginProps) {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [room, setRoom] = useState('');
   const [isAdminSignup, setIsAdminSignup] = useState(false);
   const [adminCode, setAdminCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -63,7 +62,6 @@ export default function Login({ onLogin, notice, onNoticeClear }: LoginProps) {
 
     if (!isLogin) {
       body.email = email;
-      body.room = room || undefined;
       if (isAdminSignup) {
         body.role = 'ADMIN';
         body.adminCode = adminCode;
@@ -143,20 +141,7 @@ export default function Login({ onLogin, notice, onNoticeClear }: LoginProps) {
             </div>
           )}
 
-          {!isLogin && !isAdminSignup && (
-            <div>
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Room Number</label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={room}
-                  onChange={(e) => setRoom(e.target.value)}
-                  className="w-full bg-black/40 border border-white/5 rounded-2xl px-6 py-4 text-sm font-bold text-white placeholder:text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-600/50 focus:border-red-600/50 transition-all"
-                  placeholder="e.g. 3-201"
-                />
-              </div>
-            </div>
-          )}
+
 
           {!isLogin && (
             <>
@@ -257,7 +242,6 @@ export default function Login({ onLogin, notice, onNoticeClear }: LoginProps) {
               setAdminCode('');
               setIsAdminSignup(false);
               setEmail('');
-              setRoom('');
             }}
             className="text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-red-500 transition-colors"
           >

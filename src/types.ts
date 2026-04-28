@@ -20,7 +20,9 @@ export interface EmergencyAlert {
   }[];
   guestInfo?: {
     language?: string;
+    detectedLanguage?: string;
     translatedMessage?: string;
+    aiSummary?: string;
     originalMessage?: string;
   };
 }
