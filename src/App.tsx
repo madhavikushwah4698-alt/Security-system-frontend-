@@ -10,7 +10,7 @@ import StaffDashboard from './StaffDashboard';
 import Login from './Login';
 import { User } from './types';
 import { LogOut } from 'lucide-react';
-import { API_BASE_URL, getErrorMessage, requestJson } from './api';
+import { API_BASE_URL, ApiError, getErrorMessage, requestJson } from './api';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -28,8 +28,19 @@ export default function App() {
         }
       } catch (error) {
         if (!isMounted) return;
+        
+        // Log error for debugging
+        console.log('[App] Error loading user:', error instanceof ApiError ? `${error.status} - ${error.message}` : error);
+        
+        // Only show error if it's not a 401 (Unauthorized - expected when not logged in)
+        if (error instanceof ApiError && error.status === 401) {
+          console.log('[App] User not logged in (401) - showing login page');
+          return; // Expected - user just not logged in yet
+        }
+        
+        // Show other errors
         const message = getErrorMessage(error, '');
-        if (!message.toLowerCase().includes('401')) {
+        if (message) {
           setAppNotice(message);
         }
       } finally {
@@ -73,6 +84,20 @@ export default function App() {
       setAppNotice(getErrorMessage(error, 'Logout failed.'));
     }
   };
+
+  // Clear notice when user successfully logs in
+  useEffect(() => {
+    if (user) {
+      setAppNotice('');
+    }
+  }, [user]);
+
+  // Auto-clear errors/notices after 6 seconds
+  useEffect(() => {
+    if (!appNotice) return;
+    const timer = setTimeout(() => setAppNotice(''), 6000);
+    return () => clearTimeout(timer);
+  }, [appNotice]);
 
   if (isLoading) {
     return (

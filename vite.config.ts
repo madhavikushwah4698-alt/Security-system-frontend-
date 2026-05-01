@@ -24,10 +24,18 @@ export default defineConfig(({mode}) => {
           target: 'http://localhost:3001',
           changeOrigin: true,
           secure: false,
+          credentials: 'include',
+          rewrite: (path) => path,
+          configure: (proxy, options) => {
+            proxy.on('proxyReq', (proxyReq, req, res) => {
+              proxyReq.setHeader('Origin', 'http://localhost:3001');
+            });
+          },
         },
         '/socket.io': {
           target: 'http://localhost:3001',
           ws: true,
+          credentials: 'include',
         },
       },
     },
