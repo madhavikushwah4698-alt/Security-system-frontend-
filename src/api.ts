@@ -41,7 +41,10 @@ export async function parseJsonSafely<T>(response: Response): Promise<T | null> 
 }
 
 export async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(apiUrl(path), init);
+  const response = await fetch(apiUrl(path), {
+    ...init,
+    credentials: 'include', // Always send cookies with requests
+  });
   const data = await parseJsonSafely<T & { error?: string; message?: string }>(response);
 
   if (!response.ok) {
